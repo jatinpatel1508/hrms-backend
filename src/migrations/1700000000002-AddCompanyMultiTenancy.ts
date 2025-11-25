@@ -103,19 +103,21 @@ export class AddCompanyMultiTenancy1700000000002 implements MigrationInterface {
     }));
 
     // Add super_admin to role enum if not exists
-    // Find any enum type that contains the role values (employee, manager, admin)
-    const roleEnums = await queryRunner.query(`
-      SELECT DISTINCT t.typname as enum_name
+    // Find the enum type used by users.role column directly
+    const enumTypeResult = await queryRunner.query(`
+      SELECT 
+        t.typname as enum_name
       FROM pg_type t
-      JOIN pg_enum e ON t.oid = e.enumtypid
-      WHERE e.enumlabel IN ('employee', 'manager', 'admin')
-      GROUP BY t.typname
-      HAVING COUNT(DISTINCT e.enumlabel) = 3
+      JOIN pg_attribute a ON a.atttypid = t.oid
+      JOIN pg_class c ON c.oid = a.attrelid
+      WHERE c.relname = 'users' 
+        AND a.attname = 'role'
+        AND t.typtype = 'e'
       LIMIT 1;
     `);
     
-    if (roleEnums && roleEnums.length > 0) {
-      const enumName = roleEnums[0].enum_name;
+    if (enumTypeResult && enumTypeResult.length > 0) {
+      const enumName = enumTypeResult[0].enum_name;
       
       // Check if super_admin already exists in the enum
       const enumValues = await queryRunner.query(`
@@ -126,14 +128,25 @@ export class AddCompanyMultiTenancy1700000000002 implements MigrationInterface {
       const hasSuperAdmin = enumValues.some((v: any) => v.enumlabel === 'super_admin');
       
       if (!hasSuperAdmin) {
-        // Add super_admin value to existing enum
+        // Add super_admin value to existing enum using DO block to handle errors gracefully
         await queryRunner.query(`
-          ALTER TYPE ${enumName} ADD VALUE 'super_admin';
+          DO $$ 
+          BEGIN
+            IF NOT EXISTS (
+              SELECT 1 FROM pg_enum 
+              WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = '${enumName}')
+              AND enumlabel = 'super_admin'
+            ) THEN
+              ALTER TYPE ${enumName} ADD VALUE 'super_admin';
+            END IF;
+          EXCEPTION
+            WHEN duplicate_object THEN
+              -- Value already exists, do nothing
+              NULL;
+          END $$;
         `);
       }
     }
-    // If enum doesn't exist, it means the initial migration didn't run properly
-    // In that case, TypeORM will handle it when synchronize is true or when entities are loaded
 
     // Add company_id to projects
     await queryRunner.addColumn('projects', new TableColumn({

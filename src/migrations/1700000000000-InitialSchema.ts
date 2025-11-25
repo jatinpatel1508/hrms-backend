@@ -21,7 +21,7 @@ export class InitialSchema1700000000000 implements MigrationInterface {
           {
             name: 'role',
             type: 'enum',
-            enum: ['employee', 'manager', 'admin'],
+            enum: ['employee', 'manager', 'admin', 'super_admin'],
             default: "'employee'",
           },
           { name: 'hourlyRate', type: 'decimal', precision: 10, scale: 2, isNullable: true },
